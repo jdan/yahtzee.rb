@@ -77,7 +77,7 @@ class Game
     @scorecard.none? { |_, field_score| field_score.nil? }
   end
 
-  def mark!(field)
+  def score_for(field)
     unless @scorecard.key? field
       raise InvalidScorecardFieldError
     end
@@ -92,50 +92,54 @@ class Game
 
     case field
     when :ones
-      @scorecard[:ones] = score_digit(1)
+      score_digit(1)
     when :twos
-      @scorecard[:twos] = score_digit(2)
+      score_digit(2)
     when :threes
-      @scorecard[:threes] = score_digit(3)
+      score_digit(3)
     when :fours
-      @scorecard[:fours] = score_digit(4)
+      score_digit(4)
     when :fives
-      @scorecard[:fives] = score_digit(5)
+      score_digit(5)
     when :sixes
-      @scorecard[:sixes] = score_digit(6)
+      score_digit(6)
     when :three_of_a_kind
       triple = hand.group_by(&:itself).find { |_, dice| dice.count == 3 }
-      @scorecard[:three_of_a_kind] = triple.nil? ? 0 : triple[0] * 3
+      triple.nil? ? 0 : triple[0] * 3
     when :four_of_a_kind
       quadruple = hand.group_by(&:itself).find { |_, dice| dice.count == 4 }
-      @scorecard[:four_of_a_kind] = quadruple.nil? ? 0 : quadruple[0] * 4
+      quadruple.nil? ? 0 : quadruple[0] * 4
     when :full_house
       grouped = hand.group_by(&:itself)
       pair    = grouped.find { |_, dice| dice.count == 2 }
       triple  = grouped.find { |_, dice| dice.count == 3 }
 
-      @scorecard[:full_house] = (pair && triple) ? 25 : 0
+      (pair && triple) ? 25 : 0
     when :small_straight
       hand_set = Set.new(hand)
       if Set[1,2,3,4].subset?(hand_set) || Set[2,3,4,5].subset?(hand_set) || Set[3,4,5,6].subset?(hand_set)
-        @scorecard[:small_straight] = 30
+        30
       else
-        @scorecard[:small_straight] = 0
+        0
       end
     when :large_straight
       hand_set = Set.new(hand)
       if Set[1,2,3,4,5].subset?(hand_set) || Set[2,3,4,5,6].subset?(hand_set)
-        @scorecard[:large_straight] = 40
+        40
       else
-        @scorecard[:large_straight] = 0
+        0
       end
     when :yahtzee
-      @scorecard[:yahtzee] = hand.uniq.count == 1 ? 50 : 0
+      hand.uniq.count == 1 ? 50 : 0
     when :chance
-      @scorecard[:chance] = hand.sum
+      hand.sum
     else
       raise InvalidScorecardFieldError
     end
+  end
+
+  def mark!(field)
+    @scorecard[field] = score_for(field)
 
     @rolls_left = 3
   end
@@ -145,20 +149,10 @@ class Game
       raise IncompleteScorecardError
     end
 
-    upper = [:ones, :twos, :threes, :fours, :fives, :sixes].map { |field|
-      @scorecard[field]
-    }.sum
-    bonus = (upper >= 63) ? 35 : 0
-
     @scorecard.map { |_, mark| mark }.sum + bonus
   end
 
   def scorecard
-    upper = [:ones, :twos, :threes, :fours, :fives, :sixes].map { |field|
-      @scorecard[field]
-    }.sum
-    bonus = (upper >= 63) ? 35 : 0
-
     lower = [:three_of_a_kind, :four_of_a_kind, :full_house, :small_straight, :large_straight, :yahtzee, :chance].map { |field|
       @scorecard[field]
     }.sum
@@ -170,7 +164,6 @@ class Game
       Fours   #{@scorecard[:fours]}
       Fives   #{@scorecard[:fives]}
       Sixes   #{@scorecard[:sixes]}
-      UPPER   #{upper}
       BONUS   #{bonus}
       TOTAL   #{upper + bonus}
 
@@ -192,29 +185,32 @@ class Game
   def score_digit(n)
     n * @hand.filter { |d| d.value == n }.count
   end
+
+  def upper
+    [:ones, :twos, :threes, :fours, :fives, :sixes].map { |field|
+      @scorecard[field]
+    }.sum
+  end
+  
+  def bonus
+    (upper >= 63) ? 35 : 0
+  end
 end
 
 class Player
+  ALL_DICE = [0, 1, 2, 3, 4]
+  ALL_FIELDS = [
+    :ones, :twos, :threes, :fours, :fives, :sixes,
+    :three_of_a_kind, :four_of_a_kind, :full_house,
+    :small_straight, :large_straight, :yahtzee, :chance,
+  ]
+
   def initialize
     @game = Game.new
   end
 
   def play!
     raise NotImplementedError
-  end
-end
-
-class TopDownPlayer < Player
-  def play!
-    all_dice = [0, 1, 2, 3, 4]
-    [
-      :ones, :twos, :threes, :fours, :fives, :sixes,
-      :three_of_a_kind, :four_of_a_kind, :full_house,
-      :small_straight, :large_straight, :yahtzee, :chance,
-    ].each do |field|
-      @game.roll!(all_dice)
-      @game.mark!(field)
-    end
   end
 
   def score
@@ -226,10 +222,36 @@ class TopDownPlayer < Player
   end
 end
 
+class TopDownPlayer < Player
+  def play!
+    ALL_FIELDS.each do |field|
+      @game.roll!(ALL_DICE)
+      @game.mark!(field)
+    end
+  end
+end
+
+class GreedyPlayer < Player
+  def play!
+    until @game.scorecard_full?
+      @game.roll!(ALL_DICE)
+      best_field = ALL_FIELDS.max_by { |field|
+        begin
+          @game.score_for(field)
+        rescue
+          -1
+        end
+      }
+
+      @game.mark!(best_field)
+    end
+  end
+end
+
 attempts = 0
 loop do
   attempts += 1
-  p = TopDownPlayer.new
+  p = GreedyPlayer.new
   p.play!
 
   if p.score > 200
