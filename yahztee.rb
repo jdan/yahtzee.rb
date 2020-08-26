@@ -205,25 +205,22 @@ class Player
     :small_straight, :large_straight, :yahtzee, :chance,
   ]
 
-  def initialize
+  def play!
     @game = Game.new
   end
 
-  def play!
-    raise NotImplementedError
-  end
-
   def score
-    @game.score
+    @game&.score
   end
 
   def scorecard
-    @game.scorecard
+    @game&.scorecard
   end
 end
 
 class TopDownPlayer < Player
   def play!
+    super
     ALL_FIELDS.each do |field|
       @game.roll!(ALL_DICE)
       @game.mark!(field)
@@ -233,30 +230,99 @@ end
 
 class GreedyPlayer < Player
   def play!
+    super
     until @game.scorecard_full?
       @game.roll!(ALL_DICE)
-      best_field = ALL_FIELDS.max_by { |field|
+      best_field = ALL_FIELDS.max_by do |field|
         begin
           @game.score_for(field)
         rescue
           -1
         end
-      }
+      end
 
       @game.mark!(best_field)
     end
   end
 end
 
-attempts = 0
-loop do
-  attempts += 1
-  p = GreedyPlayer.new
-  p.play!
+class Matchup
+  def initialize(p1, p2)
+    @p1 = p1
+    @p2 = p2
 
-  if p.score > 200
-    puts p.scorecard
-    puts "Took #{attempts} attempts"
-    break
+    @metrics = {
+      p1_wins: 0,
+      p2_wins: 0,
+      ties: 0,
+
+      p1_elo: 1200.0,
+      p2_elo: 1200.0,
+
+      # perf: store game and score separately
+      p1_best_game: 0,
+      p2_best_game: 0,
+    }
+  end
+
+  def play_round!
+    @p1.play!
+    @p2.play!
+
+    @metrics[:p1_best_game] = @p1.score if @p1.score > @metrics[:p1_best_game]
+    @metrics[:p2_best_game] = @p2.score if @p2.score > @metrics[:p2_best_game]
+
+    if @p1.score > @p2.score
+      @metrics[:p1_wins] += 1
+      update_elo!(1, 0)
+    elsif @p2.score > @p1.score
+      @metrics[:p2_wins] += 1
+      update_elo!(0, 1)
+    else
+      @metrics[:ties] += 1
+      update_elo!(0.5, 0.5)
+    end
+  end
+
+  def standings
+    {
+      p1: @metrics[:p1_wins],
+      p2: @metrics[:p2_wins],
+      tie: @metrics[:ties]
+    }
+  end
+
+  def elo
+    {
+      p1: @metrics[:p1_elo],
+      p2: @metrics[:p2_elo],
+    }
+  end
+
+  def best
+    {
+      p1: @metrics[:p1_best_game],
+      p2: @metrics[:p2_best_game],
+    }
+  end
+
+  private
+  def update_elo!(p1_score, p2_score)
+    k_value = 32
+    qa = 10**(@metrics[:p1_elo] / 400)
+    qb = 10**(@metrics[:p2_elo] / 400)
+    ea = qa / (qa + qb)
+    eb = qb / (qa + qb)
+
+    @metrics[:p1_elo] += (k_value * (p1_score - ea)).round.to_f
+    @metrics[:p2_elo] += (k_value * (p2_score - eb)).round.to_f
   end
 end
+
+m = Matchup.new(GreedyPlayer.new, TopDownPlayer.new)
+100.times do
+  m.play_round!
+end
+puts m.standings
+puts m.elo
+puts m.best
