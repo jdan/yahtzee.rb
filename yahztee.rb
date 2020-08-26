@@ -311,11 +311,11 @@ class Matchup
     k_value = 32
     qa = 10**(@metrics[:p1_elo] / 400)
     qb = 10**(@metrics[:p2_elo] / 400)
-    ea = qa / (qa + qb)
-    eb = qb / (qa + qb)
+    p1_expected = qa / (qa + qb)
+    p2_expected = qb / (qa + qb)
 
-    @metrics[:p1_elo] += (k_value * (p1_score - ea)).round.to_f
-    @metrics[:p2_elo] += (k_value * (p2_score - eb)).round.to_f
+    @metrics[:p1_elo] += (k_value * (p1_score - p1_expected)).round.to_f
+    @metrics[:p2_elo] += (k_value * (p2_score - p2_expected)).round.to_f
   end
 end
 
